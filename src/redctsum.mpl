@@ -1,3 +1,4 @@
+Copyright (c) 2023, Hadrien Brochet, Bruno Salvy
 
 really_lose_info_I_mean_it := proc(mm, $)
   local tv, tvars := mm:-typed_vars;
