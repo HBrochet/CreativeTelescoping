@@ -1,3 +1,5 @@
+Copyright (c) 2023, Hadrien Brochet, Bruno Salvy
+
 ### InitRed: initialization procedure to execute before reducing rational functions 
 ###          in n_arg modulo L_arg^*(K(n_arg))
 ### Input
