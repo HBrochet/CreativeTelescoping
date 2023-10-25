@@ -1,5 +1,3 @@
-# Copyright (c) 2023, Hadrien Brochet, Bruno Salvy
-
 ### InitRed: initialization procedure to execute before reducing rational functions 
 ###          in n_arg modulo L_arg^*(K(n_arg))
 ### Input
@@ -9,31 +7,25 @@
 InitRed:=proc(L_arg,n_arg,CertBool)
 local rec, i;
     rec:=Record(
-        'denG',         # Multiple of the denominator of the certificate G currently computed
-        'G',            # Current certificate 
-        'decR',         # Hash table storing the decomposition of the rational function R,
-                        # the ith entry is the element 
         'L',            # List of coefficient of the operator in Sn^{-1} w.r.t. which we reduce R
         'var',          # Name of the summation variable
-        'RepresDen',    # List of the representative modulo shifts of the irreducible factors encountered so far
+        'RepresDen',    # List of the representative modulo shifts of the irreducible factors encountered so far
         'CertB',        # Boolean, if true the certificate G is computed otherwise it isn't
         'r',            # Order of the operator L 
         'Pr',           # Coefficient of order r of L
         'P0',           # Coefficient of order 0 of L
-        'CurRepres',    # List of the representative modulo shifts of the irreducible factors encountered since the
-                        #                                       previous computation of a shiftless decomposition
-        'basis',        # Hash table storing a basis of the finite dimentional spaces used in the strong reductions of poles and polynomials, that is []
+        'basis',        # Hash table storing a basis of the finite dimensional spaces used in the strong reductions of poles and polynomials, that is []
+        'basispol',     # basis of the finite dimensional spaces used in the strong reductions of polynomials
         'sigm',         # Variable used in the indicial equation at infinity: L(n^s)= C(s)(n^{s+sigm} + o(1))
         's',            # variable for the indicial polynomials
         'C',            # See the line above
-        'Croot'         # List of non-negative integer roots of Croot 
+        'Croot'        # List of non-negative integer roots of C 
     );
-    rec:-denG:=1;
     rec:-var:=n_arg; # variable associated to Sn
     rec:-r:=nops(L_arg)-1;  # order of the operator L
     # adjoint operator: the coefficients of powers of S_n^{-1).
     rec:-L:=map(normal,[seq(eval(op(i,L_arg),rec:-var=rec:-var-i+1),i=1..rec:-r+1)]);
-    rec:-RepresDen:=[]; # list of representatives of the denominators reduced so far 
+    rec:-RepresDen:={}; # set of representatives of the denominators reduced so far 
     rec:-CertB:=CertBool;
     rec:-P0:=rec:-L[1]; # constant coefficient of L
     rec:-Pr:=rec:-L[rec:-r+1]; # leading coefficient of L
@@ -43,36 +35,200 @@ local rec, i;
     rec;
 end:
 
-## Reduction
-# Input:
-#   R:  rational function in rec:-var
-#   rec: record as constructed by InitRed
-# Output: 
-#   the reduction of R mod rec?
-#   the certificate G (if rec:-CertB=false returns a vector of 0)
-#   a multiple of the denominator of G (if rec:-CertB=false returns 1))
+# Input is a pfrac in _Pfrac and _Shift,
+# collected in _Pfrac
 Reduction:=proc(R,rec)
-local pol,i,r,var;
-    r:=rec:-r;
-    rec:-G:=Vector(r); # certificate
-    rec:-denG:=1;
-    var:=rec:-var;
-    unassign('rec:-decR');
-    userinfo(3,'red',"decomposing the rational function at time", time());
-    MyShiftlessDecIrred(R,rec);
-    userinfo(3,'red',"starting the weak reduction at time", time());
-    for pol in rec:-CurRepres do weakreduction(pol,rec) od;
-    userinfo(3,'red',"starting the strong reduction at time", time());
-    for pol in rec:-CurRepres do strongreduction(pol,rec) od;
-    userinfo(3,'red',"starting the weak reduction of the polynomial part at time", time());
-    rec:-decR[0]:=weakreducpol(rec:-decR[0],rec);
-    userinfo(3,'red',"starting the strong reduction of the polynomial part at time", time());
-    rec:-decR[0]:=strongreducpol(rec:-decR[0],rec);
+local inds,i,canform, cert, certpol, pol, polpart, ratpart;
+    inds:=indets(R,specindex(anything,_Pfrac));
+    for pol in inds do
+        polpart[pol],ratpart[pol],cert[pol]:=
+            LocalReduction(op(pol),add(coeff(R,pol,i)*pol^i,i=1..degree(R,pol)),rec)
+    end do;
+    polpart:=subs([seq(pol=0,pol=inds)],R)+add(polpart[pol],pol=inds);
+    polpart,certpol:=ReductionPolynomial(polpart,rec);
+    canform,cert:=
+        polpart+add(ratpart[pol],pol=inds),
+        certpol+add(cert[pol],pol=inds);
+    if rec:-CertB then ASSERT(TestCanonicalForm(R,canform,cert,rec)) fi;
+    canform,cert
+end:
 
-    rec:-decR[0] + add(add(rec:-decR[pol][i][1]/eval(pol,var=var-i)^rec:-decR[pol][i][2],i=0..r-1),
-        pol in rec:-CurRepres),
-        rec:-G,rec:-denG
-end proc;
+
+ReductionPolynomial:=proc(R,rec)
+local var:=rec:-var,pol,cert,i,deg,precert,C, c, co, degi, sigm, copol,j;
+    pol:=primpart(R,var,'copol');
+    if pol=0 then return 0,0 fi;
+    sigm:=rec:-sigm;
+    C:=rec:-C;
+    cert:=0;
+    # weak reduction
+    for deg from degree(pol,var) by -1 to 0 do
+        if deg>=sigm and not member(deg-sigm,rec:-Croot) then 
+            co:=coeff(pol,var,deg);
+            if co<>0 then
+                precert:=var^(deg-sigm)/expand(subs(rec:-s=deg-sigm,C));
+                # Subtract rec:-L(cert)
+                pol:=collect(pol-co*evalL(precert,rec),var,normal);
+                if rec:-CertB then cert += copol*co*precert fi
+            fi
+        fi
+    end do;
+    # strong reduction
+#   rec:-basispol is a list of [pol,cert], 
+#   sorted by decreasing degree of pol
+    if assigned(rec:-basispol) then
+        for i to nops(rec:-basispol) do
+            degi :=degree(rec:-basispol[i][1],var);
+            c:=normal(coeff(pol,var,degi)/lcoeff(rec:-basispol[i][1],var));
+            if c<>0 then 
+#                pol:=collect(pol -c*rec:-basispol[i][1],var,normal);
+                pol:=add(coeff(pol,var,j)*var^j,j=degi+1..degree(pol,var))
+                    +add(normal(coeff(pol,var,j)-c*coeff(rec:-basispol[i][1],var,j))*var^j,j=0..degi-1);
+                if rec:-CertB then cert += c*copol*rec:-basispol[i][2] fi
+            fi
+        od
+    fi;
+    pol:=collect(pol*copol,var,normal);
+    if rec:-CertB then ASSERT(TestCanonicalForm(R,pol,cert,rec)) fi;
+    pol,cert
+end:
+
+# Reduce the part with denominators that are shifted versions of pol
+LocalReduction:=proc(pol,ratfun,rec)
+local polpart,rat,cert,cert2, polpart2, rat2;
+    polpart,rat,cert:=WeakReduction(args);
+    if rat<>0 then # strong reduction
+        polpart2,rat2,cert2:=StrongReduction(pol,rat,rec);
+        polpart += polpart2; 
+        rat := rat2;
+        if rec:-CertB then cert += cert2 fi
+    fi;
+    if rec:-CertB then ASSERT(TestCanonicalForm(ratfun,polpart+rat,cert,rec)) fi;
+    polpart,rat,cert
+end:
+
+## This follows the algorithm in section 4.2, with computation of A(n) or A'(n+r)
+# s.t. L*(A/pol(n-shift)^sj) removes the pole in pol(n-shift).
+# The complexity may be dominated by the extended gcd.
+# If this is the case (to be analyzed),
+# then it could be more efficient to compute and store the 
+# L*(n^ell/pol(n-shift)^sj) for ell=0..sj*deg pol -1,
+# and then perform a simple Gaussian reduction.
+WeakReduction:=proc(pol,ratfun,rec)
+local rat,polpart:=0,var,cert:=0,r:=rec:-r,OrdMult, den,  inds, cop,
+      denprecert, lambda, mon, numprecert, ptilde, shift, shiftpol, sj, tmp1,
+      shiftpow,newpolpart,corat,colambda;
+    var:=rec:-var;
+    inds:=[_Pfrac[pol],_Shift];
+    rat:=primpart(ratfun,[op(inds),var],'corat');
+    do # weak reduction
+        newpolpart,rat:=ExtractPolynomialPart(pol,rat,rec);
+        polpart += newpolpart;
+        shift:=ldegree(rat,_Shift);
+        if shift>=0 then
+            shift:=degree(rat,_Shift);
+            if shift<rec:-r then break fi
+        fi;
+        mon:=coeff(rat,_Shift,shift);
+        # Computation of A & B from Eq. (22) in the article
+        den:=translate(pol,var,-shift);
+        if shift<0 then OrdMult:=0; tmp1:=rec:-P0; shiftpow:=0
+        else OrdMult:=valpol2(rec:-Pr,den,var,'tmp1');shiftpow:=-r
+        fi;
+        sj:=degree(mon,_Pfrac[pol]);
+        lambda:=lcoeff(mon,_Pfrac[pol]);
+        lambda:=primpart(lambda,var,'colambda');
+        shiftpol:=den^sj;
+        ptilde:=rem(tmp1,shiftpol,var);
+        ptilde:=primpart(ptilde,var,'cop');
+        gcdex(ptilde,shiftpol,var,'numprecert'); # numprecert = A
+        numprecert:=rem(numprecert*lambda,shiftpol,var);
+        denprecert:=den^(sj+OrdMult);
+        if shift>=0 then
+            numprecert:=translate(numprecert,var,r);
+            denprecert:=translate(denprecert,var,r)
+        fi;
+        if rec:-CertB then 
+            cert += numprecert/denprecert*corat*colambda/cop
+        fi;
+        # Subtract rec:-L(cert)
+        rat:=collect(rat-evalL(normal(colambda/cop*numprecert)*_Pfrac[pol]^(sj+OrdMult)*_Shift^(shift+shiftpow),rec),inds,normal)
+    od;
+    polpart:=collect(polpart*corat,var,normal);
+    rat:=collect(corat*rat,inds,normal);
+    if rec:-CertB then ASSERT(TestCanonicalForm(ratfun,polpart+rat,cert,rec)) fi;
+    polpart,rat,cert
+end:
+
+StrongReduction:=proc(pol,ratfun,rec)
+local var,basis,res,i,degshift,co,cobasis,degcobasis,degco,coco,degcobasisvar,cococo,lincomb,cert,polpart;
+    cert:=0;
+    if not assigned(rec:-basis[pol]) then return 0,ratfun,0 fi;
+    var:=rec:-var;
+    basis:=rec:-basis[pol];
+    res:=ratfun;
+    for i to nops(basis) do
+        res:=expand(res);
+        pol:=basis[i][1];
+        degshift:=degree(pol,_Shift);
+        co:=coeff(res,_Shift,degshift);
+        if co<>0 then
+            cobasis:=coeff(pol,_Shift,degshift);
+            degcobasis:=degree(cobasis,_Pfrac[pol]);
+            degco:=degree(co,_Pfrac[pol]);
+            if degcobasis<=degco then
+                coco:=coeff(co,_Pfrac[pol],degco);
+                cobasis:=cobasis*translate(pol,var,-degshift)^(degco-degcobasis);
+                degcobasisvar:=degree(cobasis,var);
+                cococo:=coeff(coco,degcobasisvar);
+                if cococo<>0 then 
+                    lincomb:=cococo/coeff(cobasis,var,degcobasisvar);
+                    res:=res-expand(lincomb*basis[i][1]);
+                    if rec:-CertB then cert += lincomb*rec:-basis[pol][i][2] fi
+                fi
+            fi
+        fi
+    end do;
+    polpart:=subs(_Pfrac[pol]=0,res); res:=res-polpart;
+    if rec:-CertB then ASSERT(TestCanonicalForm(ratfun,polpart+res,cert,rec)) fi;
+    polpart,res,cert
+end:
+
+# Split the rational function ratfun into 
+# a polynomial part and a part that has poles at pol,
+# with numerators of smaller degree than their denominators.
+ExtractPolynomialPart:=proc(pol,ratfun,rec)
+local i, ld, deg, var:=rec:-var, co, mon, poly;
+    ld:=ldegree(ratfun,_Shift);
+    deg:=degree(ratfun,_Shift);
+    for i from ld to deg do
+        co:=coeff(ratfun,_Shift,i); # polynomial in _Pfrac[pol]
+        poly[i],mon[i]:=NormalizePfracElement(pol,co,i,var); # poly+lambda*_Pfrac[pol]^expo
+    end do;
+    ASSERT(normal(CanonicalFormToRat(ratfun-add(poly[i],i=ld..deg)-add(mon[i]*_Shift^i,i=ld..deg),rec))=0);
+    collect(add(poly[i],i=ld..deg),rec:-var,normal),add(mon[i]*_Shift^i,i=ld..deg)
+end:
+
+# Input: a polynomial shiftedpart in _Pfrac[pol] 
+# Output: polynomial and a monomial co(var)*_Pfrac[pol]^expo
+#   such that subs(var=var-shift,shiftedpart) == 
+#       polynomial + co(var)*_Pfrac[pol]^expo 
+#   and degree(co)<expo*degree(pol)
+#   and gcd(co,pol(var-shift))=1.
+# This corresponds to normalizing the partial fraction element.
+NormalizePfracElement:=proc(pol,shiftedpart,shift,var)
+local deg,ldeg,shiftedpol,expo,i,newpol,polpart,pvar,co;
+    pvar:=_Pfrac[pol];
+    if not has(shiftedpart,pvar) then return shiftedpart,0 fi;
+    deg:=degree(shiftedpart,pvar);
+    ldeg:=ldegree(shiftedpart,pvar);
+    shiftedpol:=translate(pol,var,-shift);
+    newpol:=(add(coeff(shiftedpart,pvar,i)*shiftedpol^(deg-i),i=ldeg..deg));
+    newpol:=primpart(newpol,var,'co');
+    polpart:=quo(newpol,shiftedpol^deg,var,'newpol');
+    expo:=valpol2(newpol,shiftedpol,var,'newpol');
+    collect(co*polpart,var),normal(co*newpol)*pvar^(deg-expo) # is normal useful?
+end:
 
 #ComputeBasis
 #Input:
@@ -92,9 +248,9 @@ local DecP0,DecPr,pol,l,CurRepres,repres,r,P0,Pr,var;
 
     r:=rec:-r;
     P0:=rec:-P0;
+    
     Pr:=rec:-Pr;
     var:=rec:-var;
-    rec:-RepresDen :={};
 
     DecP0,CurRepres:=MyShiftlessDecFact(rec:-P0,rec);
     repres:={op(CurRepres)};
@@ -107,7 +263,7 @@ local DecP0,DecPr,pol,l,CurRepres,repres,r,P0,Pr,var;
                 DecP0[pol]); 
         else DecP0[pol]:=[] fi;
         if not(type(DecPr[pol],indexed))  then 
-            DecPr[pol]:=[seq([l[1]-r,l[2]],l in DecPr[pol])];
+            DecPr[pol]:=[seq([l[1]-r,l[2]],l = DecPr[pol])];
             DecPr[pol]:=select(
                 l-> evalb(op(1,l)>=0 and op(2,l) <= valpol2(Pr,eval(pol,var=var-op(1,l)-r),rec:-var)),
                 DecPr[pol]);
@@ -121,139 +277,47 @@ end:
 #ComputeBasisSR
 # Input:
 #   pol: a polynomial in the list rec:-RepresDen
-#   indeltsP0: list of couple (s,o') where s is a shift and o' an order
-#              s.t. for o<o', it may happen that L(1/Q(n-s)^o) does not reduce to 0 by the weak reduction 
-#              because of a singularity in P0
+#   indeltsP0: list of couples (s,o') where s is a shift and o' an order
+#              s.t. for o<=o' and ell<o*deg Q, L(n^ell/Q(n-s)^o)
+#               might not reduce to 0 by the weak reduction
+#               because of a singularity in P0
 #   indeltsPr: same as above with Pr in place of P0
 #   rec: record as constructed by InitRed
-# No Output. Instead the results are stored in rec:-basis[pol] as a sequence composed of:
-#    a matrix containing the basis of the finite dimensional [L(K_pol(rec:-var))]_pol (without the polynomial basis elements)
-#    a list of the polynomial basis elements
-#    a list of the certificates associated to the polynomial basis elements
-#    a list of multiples of the denominators of the associated certificates
+# No Output. Instead the results are stored in rec:-basis[pol] 
+#    as a list of [rat,cert] where
+#    . rat is a polynomial where
+#       _Pfrac[pol]^s*_Shift^i encodes 1/pol(var-i)^s
+#    . the rat form a basis of the finite dimensional
+#       [L(K_pol(rec:-var))]_pol
+#    . cert is a certificate associated to rat
 
 ComputeBasisSR:=proc(pol,indeltsP0,indeltsPr,rec)
-local degP,m,vectG,vectpol,ExcepEqs,s,couple,i,j,ord,l,shiftpol,o,re,p,num,ordmax,maxi,indelt,q,denGrel,var,r,L,coefnumer,qu;
+local degP,m,s,couple,i,j,ord,l,indelt,var,canform,cert,ratfrac,tored,polpart;
 
-    var := rec:-var;
-    r:= rec:-r;
-    L:= rec:-L;
-
-    degP:=degree(pol,var);
     m:=add(op(2,l),l in indeltsP0) + add(op(2,l), l in indeltsPr);
-    maxi:=max(add(op(2,l),l in indeltsP0), add(op(2,l), l in indeltsPr));
-    ordmax:=max(seq(op(2,l),l in indeltsP0),seq(op(2,l),l in indeltsPr));
-    indelt:=[op(indeltsP0),op(indeltsPr)];
-
     if m=0 then return fi;
-
-    vectG:=Vector(m*degP);
-    vectpol:=Vector(m*degP);
-    ExcepEqs:=Matrix(1..m*degP,1..(ordmax+maxi)*degP*r+m*degP);
-    s:=1;
+    var := rec:-var;
+    degP:=degree(pol,var);
+    indelt:=[op(indeltsP0),op(indeltsPr)];
+    s:=0;
     for couple in indelt do
         i,ord:=op(couple);
         for j from 1 to ord do
             for l from 0 to degP-1 do 
-                ### initialise rec:-decR with L(var^l/pol(var-poles[i])^j)
-                if rec:-CertB then rec:-G:=certif_lagrange(var^l/eval(pol,var=var-i)^j,rec) else rec:-G:= 0 fi;
-                rec:-decR[0]:=0;
-                rec:-decR[pol]["min"]:=i;
-                rec:-decR[pol]["max"]:=i+r;
-                for o from min(i,0) to max(i+r,r-1) do
-                    rec:-decR[pol][o]:=0,0
-                od;
-                for o from 0 to r do 
-                    shiftpol:=eval(pol,var=var-(i+o))^j;
-                    re:=rem(L[o+1]*(var-o)^l,shiftpol,var,'qu');
-                    rec:-decR[pol][i+o]:= re,j;
-                    rec:-decR[0]:=rec:-decR[0]+qu
-                od;
-                weakreduction(pol,rec);
-                ### fill the s line of the matrix ExcepEqs with the coefficients of rec:-decR in the basis var^l/pol(var-i)^(ordmax+maxi)
-                for o from 0 to r-1 do 
-                    shiftpol:=eval(pol,var=var-o);
-                    num:=rec:-decR[pol][o][1];
-                    for p from (ordmax+maxi)-1 by -1 to 0 do 
-                        num:=quo(num,shiftpol,var,'coefnumer');
-                        for q from degP-1 by -1 to 0 do 
-                            ExcepEqs[s,o+1+((ordmax+maxi-1-p)*degP)*r]:=coeff(coefnumer,var,q);
-                        od;
-                    od;
-                od;
-                vectG[s]:=rec:-G;
-                vectpol[s]:=rec:-decR[0];
-                unassign('rec:-decR');
+                ### initialise with L(var^l/pol(var-i)^j)
+                tored:=evalL(var^l*_Pfrac[pol]^j*_Shift^i,rec);
+                polpart,canform,cert[s+1]:=WeakReduction(pol,tored,rec);
+                canform:=polpart+canform;
+                if canform=0 then next fi;
                 s:=s+1;
-            od;
-        od;
+                ratfrac[s]:=canform;
+                if rec:-CertB then cert[s] := -cert[s]+var^l/subs(var=var-i,pol)^j fi;
+            od
+        od
     od;
-
-    # augmented matrix
-    for i from 1 to m*degP do 
-        ExcepEqs[i,i+(ordmax+maxi)*degP*r]:=1
-    od;
-
-    ExcepEqs:=LinearAlgebra['ReducedRowEchelonForm'](ExcepEqs); 
-    vectpol:=LinearAlgebra['Multiply'](LinearAlgebra['SubMatrix'](ExcepEqs,1..m*degP,(ordmax+maxi)*degP*r+1..(ordmax+maxi)*degP*r+m*degP),vectpol);
-    vectpol:=map(collect,vectpol,var);
-    if rec:-CertB then 
-        vectG:= LinearAlgebra['Multiply'](LinearAlgebra['SubMatrix'](ExcepEqs,1..m*degP,(ordmax+maxi)*degP*r+1..(ordmax+maxi)*degP*r+m*degP),vectG);
-        denGrel:=Vector(m*degP);
-        for i to m*degP do denGrel[i]:=lcm(seq(primpart(denom(vectG[i][j]),var),j=1..r)) od; ## !!! Can be expensive
-    fi;
-    rec:-basis[pol]:=[LinearAlgebra['SubMatrix'](ExcepEqs,1..m*degP,1..(ordmax+maxi)*degP*r),vectpol,vectG,denGrel]
-end;
-
-#addlistSRP
-# Input:
-#   PolRels: a list of univariate polynomials in rec:-var in echelon form 
-#   PolRelsG: a list of their associated certificates
-#   PolRelsdenG: a list of multiple of the denominators of the associated certificates
-#   npol_: a new polynomial to reduce by the echelon form and eventually add to the list
-#   nG_: its certificate
-#   Gden_: a multiple of its denominator
-#   rec: record as constructed by InitRed
-# Output:
-#   PolRels: the updated list
-#   PolRelsG: the updated list
-#   PolRelsdenG: the updated list
-
-addlistSRP:=proc(PolRels,PolRelsG,PolRelsdenG,npol_,nG_,Gden_,rec)
-local npol,nG,dnp,resG,i,c,Gden,resGden,var;
-
-    var:=rec:-var;
-    npol:=npol_;
-    nG:=nG_;
-    Gden:=Gden_;
-    
-    if npol=0 then return PolRels,PolRelsG,PolRelsdenG fi;
-
-    dnp := degree(npol,var);
-    resG:=[];
-    for i to nops(PolRels) do
-        if degree(PolRels[i],var) = dnp then 
-            c:= coeff(npol,var,dnp);
-            npol:= collect(npol - PolRels[i]*c,var,normal);
-            if rec:-CertB then nG:=nG - PolRelsG[i]*c; Gden:=lcm(Gden,primpart(PolRelsdenG[i],var)); fi;
-            return addlistSRP(PolRels,PolRelsG,PolRelsdenG,collect(npol,var,normal),nG,Gden,rec);
-        fi;
-        if degree(PolRels[i],var) > dnp then 
-            c:=coeff(npol,var,dnp);
-            nG:=nG/c;
-            npol:=collect(npol/c,var,normal);
-            if rec:-CertB then
-                resG:=[op(1..i-1,PolRelsG),nG,op(i..nops(PolRels),PolRelsG)];
-                resGden:=[op(1..i-1,PolRelsdenG),Gden,op(i..nops(PolRels),PolRelsdenG)]
-            fi;
-            return [op(1..i-1,PolRels),npol,op(i..nops(PolRels),PolRels)],resG,resGden;
-        fi;
-    od;
-    c:=coeff(npol,var,dnp);
-
-    npol:=collect(npol/c,var,normal);
-    nG:=nG/c;
-    return [op(PolRels),npol],[op(PolRelsG),nG],[op(PolRelsdenG),Gden];
+    if s<>0 then
+        rec:-basis[pol]:=RowEchelonForm([seq(ratfrac[i],i=1..s)],[seq(cert[i],i=1..s)],pol,rec)
+    fi
 end;
 
 #ComputeBasisSRP
@@ -261,219 +325,61 @@ end;
 #   rec: record as constructed by InitRed
 # No Output: It computes an echelon basis of the finite dimensional space
 #           [L(K[rec:-var]) +  sum_{pol\in rec:-represDen} [L(K_pol(rec:-var))]_pol\inter K[rec:-var]]_\infty
-
-ComputeBasisSRP:=proc(rec);
-local PolRels,PolRelsG,i,pol,s,j,cdim,rdim,tmp,PolRelsdenG,Gden,var,L,r;
+#   The elements of the basis are monic.
+ComputeBasisSRP:=proc(rec)
+local i,pol,s,var,M,j,canform,cert,deg,lincomb,listpols,co;
     var := rec:-var;
-    r:= rec:-r;
-    L:= rec:-L;
-
-    PolRels:=[];
-    PolRelsG:=[];
-    PolRelsdenG:=[];
-
-    for i in rec:-Croot do 
-        rec:-G:=0;
-        tmp:=weakreducpol(add(L[j+1]*(var-j)^i,j=0..r),rec);
-        Gden:=1;
-        PolRels,PolRelsG,PolRelsdenG:=addlistSRP(PolRels,PolRelsG,PolRelsdenG,tmp,rec:-G,Gden,rec)
+    s:=0;
+    ### roots of the indicial polynomial at infinity
+    for i in rec:-Croot do
+        s:=s+1;
+        canform[s],cert[s]:=Reduction(evalL(var^i,rec),rec)
     od;
-
-    ### retrieve polynomial relations from basis
+    ### polynomial relations from singularities
     for pol in rec:-RepresDen do
-        if type(rec:-basis,indexed) or type(rec:-basis[pol],indexed) then next fi;
-        rdim,cdim:=LinearAlgebra['Dimension'](rec:-basis[pol][1]);
-
-        s:=1;
-        i:=1;
-        while s < rdim+1 do
-            while i < cdim+1 and rec:-basis[pol][1][s,i]=0 do
-                i:=i+1
-            od;
-            if i = cdim+1 then break fi;
+        if type(rec:-basis,indexed) or not assigned(rec:-basis[pol]) then next fi;
+        M:=rec:-basis[pol];
+        for i to nops(M) while has(M[i][1],_Pvar) do od;
+        if i=nops(M)+1 then next fi;
+        for j from i to nops(M) do
             s:=s+1;
-        od;
-
-        if i = cdim+1 then
-            while s< rdim+1 and rec:-basis[pol][2][s]<>0 do 
-                PolRels,PolRelsG,PolRelsdenG:=addlistSRP(PolRels,PolRelsG,PolRelsdenG,collect(rec:-basis[pol][2][s],var,normal),rec:-basis[pol][3][s],rec:-basis[pol][4][s],rec);
-                s:=s+1;
-            od;
-        fi;
+            canform[s],cert[s]:=op(rec:-basis[pol][j])
+        end do;
+        rec:-basis[pol]:=rec:-basis[pol][1..i-1];
+        if rec:-basis[pol]=[] then unassign('rec:-basis[pol]'); next fi;
     od;
-    rec:-basis[0]:=PolRels,PolRelsG,PolRelsdenG
-end:
-
-
-# Weak reduction of poles
-# Input: 
-#   pol: a polynomial in the list rec:-represDen
-#   rec: record as constructed by InitRed
-# no Output: instead modify the rational function stored in table rec:-decR and being reduced.
-#   A weak reduction w.r.t. the polynomial pol is performed.
-#   At the end, if the denominator of decR is divisible by some pol(n-i), then i is in [0,r-1].
-weakreduction:=proc(pol,rec)
-local i,imin,imax,shiftpol,shiftpol_,Rcoeff,ord,j,PolPart,OrdMult,ordj,d,tmp1,var,r,L,P0,Pr,
-    numcert,cert,co1,co2,dencert,pt,ptilde,tmp;
-    var:=rec:-var;
-    r:=rec:-r;
-    L:=rec:-L;
-    P0:=rec:-P0;
-    Pr:=rec:-Pr;
-
-    imin:=rec:-decR[pol]["min"];
-    imax:=rec:-decR[pol]["max"];
-    userinfo(4,'red',"representative for the weak reduction:",pol,"dispersion:",imax-imin);
-
-    for i in [seq(j,j=imin..-1),seq(imax-j,j=0..imax-r)] do
-        shiftpol_:=eval(pol,var=var-i);
-        Rcoeff,ord:=rec:-decR[pol][i]; # Rcoeff is the coeff of 1/shiftpol^ord in the PFD of Rvar
-        if Rcoeff=0 then next fi;
-        # Computation of A & B from Eq. (20) in the paper
-        shiftpol:=shiftpol_^ord;
-        if i<0 then ptilde:=P0; OrdMult:=0; tmp1:=P0
-        else # max integer st pol(var-i) | Pr
-            OrdMult:=valpol2(Pr,shiftpol_,rec:-var,'tmp1')
-        fi;
-        ptilde:=rem(tmp1,shiftpol,var);
-        # Compute equation (20)
-        # gcdex(ptilde,shiftpol,Rcoeff,var,'numcert','dummy');
-        # faster in two steps:
-        gcdex(ptilde,shiftpol,var,'numcert');
-        numcert:=rem(numcert*Rcoeff,shiftpol,var);
-        dencert:=shiftpol_^(ord+OrdMult);
-        # Update certificate
-        if rec:-CertB then 
-            cert:=numcert/dencert;
-            if i>=0 then cert:=eval(cert,var=var+r) fi;
-            rec:-G:=rec:-G - certif_lagrange(cert,rec)
-        fi;
-        # Subtract rec:-L(cert)
-        for j from 0 to r do 
-            if i<0 then pt:=i+j else pt:=i+j-r fi;
-            ordj:=rec:-decR[pol][pt][2]; # order of pol(var-pt) in the denom of R
-            shiftpol_:=collect(subs(var=var-pt,pol),var);
-            if ordj < ord+OrdMult then co1:=shiftpol_^(ord+OrdMult-ordj); co2:=1
-            else co1:=1; co2:=shiftpol_^(ordj-ord) fi;
-            rec:-decR[pol][pt]:=co1*rec:-decR[pol][pt][1]-co2*L[j+1]*eval(numcert,var=var+i-pt);
-            PolPart:=quo(rec:-decR[pol][pt],shiftpol_^max(ord+OrdMult,ordj),var,'tmp');
-#if tmp=0 then lprint("= 0",i,pt,j,ordj) fi;
-            if PolPart<>0 then rec:-decR[0]:=rec:-decR[0]+PolPart; rec:-decR[pol][pt]:=tmp fi;
-            if rec:-decR[pol][pt]=0 then rec:-decR[pol][pt]:=0,0
-            else
-                d:=valpol2(rec:-decR[pol][pt],shiftpol_,rec:-var,'tmp');
-                rec:-decR[pol][pt]:=tmp,max(ord+OrdMult,ordj)-d
-            fi
+    if s=0 then return fi;
+    deg:=max(map(degree,[seq(canform[i],i=1..s)],var));
+    M:=Matrix(s,deg+1,(i,j)->coeff(canform[i],var,deg-j+1));
+    M:=<M|LinearAlgebra['IdentityMatrix'](s)>;
+    M:=LinearAlgebra['GaussianElimination'](M);
+    lincomb:=M[1..s,-s..-1];
+    listpols:=[seq(add(M[i,j]*var^(deg-j+1),j=1..deg+1),i=1..s)];
+    if rec:-CertB then
+        cert:=convert(lincomb . Vector([seq(cert[i],i=1..s)]),list)
+    fi;    
+    for s from s by -1 while listpols[s]=0 do od;
+    ## New variant where we avoid that normalization
+    #for i to s do 
+    #    co:=lcoeff(listpols[i],var);
+    #    listpols[i]:=collect(listpols[i]/co,var,normal);
+    #    if rec:-CertB then cert[i]:=cert[i]/co fi
+    #od;
+    ## Still, we make them primitive.
+    for i to s do
+        listpols[i]:=primpart(listpols[i],var,'co');
+        if rec:-CertB then cert[i]:=cert[i]/co fi
+    end do;
+    # Do *not* try to put the basis in strong echelon form.
+    # It tends to make the reductions more costly, as the 
+    # strong echelon form has actually larger "length".
+    if rec:-CertB then
+        for i to s do
+            ASSERT(normal(listpols[i]-evalLcert(cert[i],rec))=0)
         od
-    od
-end proc;
-
-# weakreducpol
-# Input: 
-#   P: a polynomial in rec:-var to be reduced
-#   rec: record as constructed by InitRed
-# Output:
-#   a polynomial reduced by the weak reduction of polynomial 
-#   At the end if its coefficient of degree i is non-zero then i is in rec:-Croot of i is smaller than rec:-sigma
-weakreducpol:=proc(P,rec)
-	local Pvar, Pnosimpl, tmp1, tmp2,j,var,r,L,sigm,C;
-
-    var:=rec:-var;
-    r:=rec:-r;
-    L:=rec:-L;
-    sigm:=rec:-sigm;
-    C:=rec:-C;
-
-    Pvar:=collect(P,var,normal);
-    Pnosimpl:=0; # polynomial part that cannot be reduced by the weak reduction
-
-	while degree(Pvar,var)>=sigm do
-        if not(degree(Pvar,var) in rec:-Croot) then
-            tmp1,tmp2:=lcoeff(Pvar,var),degree(Pvar,var);
-            Pvar:=collect(Pvar-tmp1*add(L[j+1]*eval(var^(tmp2-sigm)/eval(C,rec:-s=tmp2-sigm),var=var-j),j=0..r),var,normal);
-            if rec:-CertB then rec:-G:= rec:-G - certif_lagrange(tmp1*var^(tmp2-sigm)/eval(C,rec:-s=tmp2-sigm),rec) fi;
-        else
-            tmp1:=lcoeff(Pvar,var)*var^degree(Pvar,var);
-            Pnosimpl:=Pnosimpl+tmp1;
-            Pvar:=collect(Pvar-tmp1,var,normal);
-        fi;
-    od;
-    Pvar+Pnosimpl;
-end proc;
-
-#strongreduction
-# Input:
-#   pol: a polynomial in the list rec:-represDen
-#   rec: record as constructed by InitRed
-# no Output: instead modify the rational function stored in table rec:-decR being reduced.
-#   the string reduction w.r.t. pol is performed. That is it reduces rec:-decR 
-#   with the echelon basis of [L(K_pol(rec:-var))]_pol computed by ComputeBasisSR and stored in rec
-
-strongreduction:=proc(pol,rec)
-local rdim,cdim,degP,s,i,o,ord,k,coeffR,j,shiftpol,var,r,l;
-
-    var:=rec:-var;
-    r:=rec:-r;
-
-    if type(rec:-basis[pol],indexed) then return fi;
-    rdim,cdim:=LinearAlgebra['Dimension'](rec:-basis[pol][1]);
-    degP:=degree(pol,var);
-    s:=1;
-    i:=1;
-    while s < rdim+1 do
-        while i < cdim+1 and rec:-basis[pol][1][s,i]=0 do
-            i:=i+1
-        od;
-        if i = cdim+1 then break fi;
-
-        o:=irem(i,r,'ord'); 
-        ord:=irem(ord,degP,'l'); # basis[pol][1][s,i] contains the coeff of n^l/pol(n-o)^ord
-        k:=rec:-decR[pol][o][2];
-        if k>=ord then
-            shiftpol:=eval(pol,rec:-var=rec:-var-o);
-            coeffR:=quo(rec:-decR[pol][o][1],shiftpol^(k-ord),var);
-            if coeffR<>0 then 
-                 # use row s to reduce
-                for j from i to cdim do 
-                    o:=irem(i,r,'ord'); 
-                    ord:=irem(ord,r,'l'); # basis[pol][1][s,j] contains the coeff of n^l/pol(n-o)^ord
-                    shiftpol:=eval(pol,rec:-var=rec:-var-o);
-                    rec:-decR[pol][o]:=normal(rec:-decR[pol][o][1]-coeffR*rec:-basis[pol][1][s,j]*rec:-var^l/shiftpol^ord);
-                    rec:-decR[pol][o]:=rec:-decR[pol][o],valpol2(rec:-decR[pol][o],shiftpol,rec:-var);
-                od;
-                if rec:-CertB then
-                    rec:-G:=rec:-G-coeffR*rec:-basis[pol][3][s];
-                    rec:-denG:=lcm(rec:-denG,primpart(rec:-basis[pol][4][s],var))
-                fi;
-            fi;
-        fi;
-        s:=s+1;   
-    od;
-end;
-
-#strongreducpol
-# Input:
-#   P: a univariate polynomial in rec:-var to be reduced 
-#   rec: record as constructed by InitRed
-# Output: 
-#   the reduction of P by the echelon basis of
-#   [L(K[rec:-var]) +  sum_{pol\in rec:-represDen} [L(K_pol(rec:-var))]_pol\inter K[rec:-var]]_\infty
-#   computed in ComputeBasisSRP
-
-strongreducpol:=proc(P,rec)
-local Pvar,i,degi,c,var;
-    var:=rec:-var;
-    Pvar:=P;
-    for i from nops(rec:-basis[0][1]) by -1 to 1 do 
-        degi :=degree(rec:-basis[0][1][i],var);
-        c:=coeff(Pvar,var,degi);
-        if c<>0 then 
-            Pvar:=collect(Pvar - c*rec:-basis[0][1][i],var,normal);
-            if rec:-CertB then rec:-G:=rec:-G-c*rec:-basis[0][2][i]; rec:-denG:=lcm(rec:-denG,primpart(rec:-basis[0][3][i],var)) fi;
-        fi;
-    od;
-    Pvar;
-end;
+    fi;
+    rec:-basispol:=[seq([listpols[i],cert[i]],i=1..s)]
+end:
 
 #MyShiftlessDecFact
 # Input:
@@ -482,11 +388,11 @@ end;
 # Output:
 #   Pdec: a table containing the shiftless decomposition of P 
 #         (see ?PolynomialTools[ShiftlessDecomposition] for a definition)
+#       Pdec[pol] is a list of pairs [shift,exponent] for pol in CurRepres
 #   CurRepres: a list of representatives of the factors of Pdec modulo the shifts
-
 MyShiftlessDecFact:=proc(P,rec)
 local pol,Pdec,Pvar,i,shiftpol,factP,ord,l,var,P0,Pr,CurRepres;
-local j,IntDiffer,toremove,listint, _;
+local j,toremove,listint, _;
 
     var:=rec:-var;
     P0:= rec:-P0;
@@ -496,38 +402,34 @@ local j,IntDiffer,toremove,listint, _;
 
     ### check whether P has a factor in RepresDen. If so, begin to compute the decomposition
     for pol in rec:-RepresDen do
-        listint:=RootDifferInt(P,pol,var);
+        listint:=RootDifferInt(Pvar,pol,var);
         if listint=[] then next fi;
         CurRepres:=[op(CurRepres),pol];
         Pdec[pol]:=[];
         for i in listint do
-            shiftpol:=eval(pol,var=var+i);
+            shiftpol:=translate(pol,var,i);
             ord:=valpol2(Pvar,shiftpol,rec:-var,'Pvar');
             Pdec[pol]:=[op(Pdec[pol]),[-i,ord]]
         od;
-    od;    
-    userinfo(5,'red',"starting factorisation at", time());
-    _,factP:=op(factors(Pvar));
-    userinfo(5,'red',"factorization done at", time());
-    # remove the factors that don't depend on n
-    toremove:= [];
-    for i to nops(factP) do
-        if degree(factP[i,1],var)=0 then
-            toremove:=[op(toremove),i]
-        fi;
     od;
-    toremove:=seq( `if` (i in toremove, NULL,i), i=1..nops(factP)); # compute the mirror of the list, ie the indices of factP to keep
-    factP:=factP[[toremove]]; # update factP
-    IntDiffer:=RootDifferInt(P,P,var);
+    if has(Pvar,var) then
+        userinfo(5,'red',"starting factorisation at", time());
+        _,factP:=op(factors(Pvar));
+        userinfo(5,'red',"factorization done at", time());
+        # remove the factors that do not depend on var
+        factP:=select(has,factP,var)
+    else factP:=[]
+    fi;
 
-    while not(factP=[]) do
-        pol:=factP[1,1];
+    while factP<>[] do
+        pol:=primpart(factP[1,1],var);
 
         # add pol to RepresDen
         l:=min(RootDifferInt(pol,P0,var));
         if l=infinity then l:=max(RootDifferInt(pol,Pr,var)) fi;
         if l=-infinity then l:=0;
-        else pol:=eval(pol,var=var-l);  fi;
+        else pol:=translate(pol,var,-l)
+        fi;
         rec:-RepresDen:=rec:-RepresDen union {pol}; 
         CurRepres:=[op(CurRepres),pol];
 
@@ -536,17 +438,18 @@ local j,IntDiffer,toremove,listint, _;
         toremove:= [1]; # list of indices of elements of factP that are processed during this loop
 
         for j from 2 to nops(factP) do
-            for i in IntDiffer do
-                # test if fact[j,1] is of the form pol(n+i)
-                if expand(pol-eval(factP[j,1],var=var-i-l))=0 then
-                    Pdec[pol]:=[op(Pdec[pol]),[-i-l,factP[j,2]]];
-                    toremove:=[op(toremove),j];
-                    break
-                fi;
-            od;
+            if degree(pol,var)=degree(factP[j,1],var) then
+                for i in RootDifferInt(pol,factP[j,1],var) do
+                    # test if fact[j,1] is of the form pol(n+i)
+                    if expand(pol-translate(factP[j,1],var,-i-l))=0 then
+                        Pdec[pol]:=[op(Pdec[pol]),[-i-l,factP[j,2]]];
+                        toremove:=[op(toremove),j];
+                        break
+                    fi
+                od
+            fi
         od;
-        toremove:=seq( `if` (i in toremove, NULL,i), i=1..nops(factP)); # compute the mirror of the list, ie the indices of factP to keep
-        factP:=factP[[toremove]] # update factP
+        factP:=subsop(seq(j=NULL,j=toremove),factP);
     od;
     Pdec,CurRepres
 end proc;
@@ -560,125 +463,55 @@ local t,rnd;
     od 
 end;
 
-# MyShiftlessDecIrred
+# ShiftlessDecIrred
 # Input: 
 #   R:  a rational function in n
 #   rec: record as constructed by InitRed
-# no Output: instead store the partial fraction decomposition of R computed in the table rec:-decR.
-#     The decomposition is R = P + sum_i sum_j P_ij/Q_i(n-j)^r_ij with the Q_i shift-coprime, that is gcd(Q_i(n+k),Q_j(n))=1 for all k
-#     It is stored in a hash table rec:-decR, where P is stored in rec:-decR[0] and P_ij,r_ij are stored in rec:-decR[Q_i][j]
-
-MyShiftlessDecIrred:=proc(R,rec)
-local pol,Rvar,i,shiftpol,factQ,ord,l,tmp2,AAAAA,AAAA;
-local j,IntDiffer,toremove,listint,Q,_,var,P0,Pr,r;
+# Output: The partial fraction decomposition of R
+#     The decomposition is stored in the form
+#       R = P + sum_i sum_j P_ij*_Shift^j*_Pfrac[Q_i(n)]^r_ij 
+#     with the Q_i shift-coprime, that is gcd(Q_i(n+k),Q_j(n))=1 for all k.
+#     This represents
+#       P + sum_i sum_j P_ij/(Q_i(n)-j)^r_ij.
+#     The polynomials Q_i belong to rec:-Repres.
+#     
+ShiftlessDecIrred:=proc(R,rec)
+local pol,i,shiftpol,shiftpol_,ord,A,newnum,tmp2,pfrac;
+local Q,var,co,CurRepres,Qdec,ff,polpart;
 
     var:=rec:-var;
-    P0:= rec:-P0;
-    Pr:=rec:-Pr;
-    r:=rec:-r;
 
-#    Q:=primpart(denom(R),var,'co');
     Q:=denom(R);
-    rec:-CurRepres:=[];
+    if type(Q,`*`) then Q,co:=selectremove(has,Q,var) 
+    elif not has(Q,var) then co:=Q; Q:=1
+    else co:=1
+    fi;
 
+    newnum:=numer(R);
     ### compute the polynomial part of R
-    rec:-decR[0]:=quo(numer(R),Q,var);
-    Rvar:=normal(R-rec:-decR[0]);
-    ### check if Q has a factor in RepresDen and if so, begin to compute its decomposition
-    for pol in rec:-RepresDen do
-        listint:=RootDifferInt(Q,pol,var);
-        if listint=[] then next fi;
-        rec:-CurRepres:=[op(rec:-CurRepres),pol];
-        rec:-decR[pol]["min"]:=infinity;
-        rec:-decR[pol]["max"]:=-infinity;
+    polpart:=quo(newnum,Q,var,'newnum')/co;
+    # no non-polymial part
+    if Q=1 then polpart fi;
 
-        for i in listint do
-            shiftpol:=collect(eval(pol,var=var+i),var,normal);
-            ord:=valpol2(Q,shiftpol,rec:-var,'Q'); # denom(Rvar)=shiftpol*Q
-            shiftpol:=shiftpol^ord;
-            # Bezout relation : Rvar=A*Q + B*shiftpol 
-            tmp2:=normal(Rvar*Q*shiftpol);
-            tmp2:=rem(tmp2,shiftpol,var);
-            gcdex(Q,shiftpol,var,'AAAAA'); 
-            AAAA:=rem(AAAAA*tmp2,shiftpol,var);
-            rec:-decR[pol][-i]:=AAAA,ord; 
-            Rvar:=normal(Rvar-rec:-decR[pol][-i][1]/shiftpol);
-            rec:-decR[pol]["min"]:=min(rec:-decR[pol]["min"],-i);
-            rec:-decR[pol]["max"]:=max(rec:-decR[pol]["max"],-i);
-        od;
-    od;  
-    for pol in rec:-CurRepres do 
-        for i from min(rec:-decR[pol]["min"],0) to max(rec:-decR[pol]["max"],r-1) do
-            if type(rec:-decR[pol][i][1],indexed) then 
-                rec:-decR[pol][i]:=0,0
-            fi;
-        od;
+    Qdec,CurRepres:=MyShiftlessDecFact(Q,rec);
+    # Qdec[pol] is a list of pairs [shift,exponent] for pol in CurRepres
+    for pol in CurRepres do
+        for ff in Qdec[pol] do
+            i,ord:=op(ff);
+            shiftpol_:=translate(pol,var,-i);
+            shiftpol:=shiftpol_^ord;
+            Q:=quo(Q,shiftpol,var);
+            # Bezout relation : Rvar*Q*shiftpol = newnum = A*Q + B*shiftpol 
+            gcdex(Q,shiftpol,var,'A'); # 1 = A * Q + V * shiftpol
+            tmp2:=rem(newnum,shiftpol,var,'newnum');
+            A:=collect(rem(A*tmp2,shiftpol,var),var,normal); # newnum = A * Q + B * shiftpol
+            pfrac[pol,ff]:=A/co*_Pfrac[pol]^ord*_Shift^i;
+            newnum:=newnum-quo(A*Q,shiftpol,var) # B
+        od
     od;
-    userinfo(5,'red',"starting factorisation at", time());
-    _,factQ:=op(factors(Q));
-    userinfo(5,'red',"factorisation done at", time());
-    #remove the factors that don't depend on n 
-    toremove:= [];
-    for i to nops(factQ) do
-        if degree(factQ[i,1],var)=0 then
-            toremove:=[op(toremove),i]
-        fi;
-    od;
-    toremove:=seq( `if` (i in toremove, NULL,i), i=1..nops(factQ)); # compute the mirror of the list, ie the indices of factQ to keep
-    factQ:=factQ[[toremove]]; # update factQ
-
-    IntDiffer:=RootDifferInt(Q,Q,var);
-    while not(factQ=[]) do
-        pol:=factQ[1,1];
-        Q:=normal(Q/pol^factQ[1,2]);
-        gcdex(Q,pol^factQ[1,2],normal(Rvar*Q*pol^factQ[1,2]),var,'AAAAA','BBBBB'); # Bezout relation : P=A*Q/F^r_0 + B*F^r_0
-
-        # add pol to RepresDen
-        l:=min(RootDifferInt(pol,P0,var));
-        if l=infinity then l:=max(RootDifferInt(pol,Pr,var)) fi;
-        if l= -infinity then l:=0;
-        else pol:=eval(pol,var=var-l) fi;
-        rec:-RepresDen:=[op(rec:-RepresDen),pol]; 
-        rec:-CurRepres:=[op(rec:-CurRepres),pol];
-        rec:-decR[pol]["min"]:=-l;
-        rec:-decR[pol]["max"]:=-l;
-
-        rec:-decR[pol][-l]:=AAAAA,factQ[1,2]; # add P_0/F(n)^(r_0)
-        Rvar:=normal(Rvar-rec:-decR[pol][-l][1]/pol^factQ[1,2]);
-        Q:=denom(Rvar);
-        toremove:= [1]; # list of indices of elements of factQ that are processed during this loop
-        # test if the factors in factQ are equal to some shift of pol, if so add them to the decomposition
-
-        for j from 2 to nops(factQ) do
-            for i in IntDiffer do
-                # test if fact[j,1] is of the form pol(n+i)
-
-                if expand(pol-eval(factQ[j,1],var=var-i-l))=0 then
-                    Q:=normal(Q/factQ[j,1]^factQ[j,2]);
-                    gcdex(Q,factQ[j,1]^factQ[j,2],normal(Rvar*Q*factQ[j,1]^factQ[j,2]),var,'AAAA','BBBB'); # Bezout relation : 1=A*Q/F(n-i)^r_i + B*F(n-i)^r_i
-                    rec:-decR[pol][-i-l]:=AAAA,factQ[j,2];  # compute P_i/F(n-i)^(r_i)
-
-                    Rvar:=normal(Rvar-rec:-decR[pol][-i-l][1]/factQ[j,1]^factQ[j,2]);
-                    Q:=denom(Rvar);
-                    toremove:=[op(toremove),j];
-                    rec:-decR[pol]["min"]:=min(rec:-decR[pol]["min"],-i-l);
-                    rec:-decR[pol]["max"]:=max(rec:-decR[pol]["max"],-i-l);
-                    break
-                fi;
-            od;
-        od;
-
-        toremove:=seq( `if` (i in toremove, NULL,i), i=1..nops(factQ)); # compute the mirror of the list, ie the indices of factQ to keep
-        factQ:=factQ[[toremove]] # update factQ
-    od;
-
-    for pol in rec:-CurRepres do 
-        for i from min(rec:-decR[pol]["min"],0) to max(rec:-decR[pol]["max"],r-1) do
-            if type(rec:-decR[pol][i][1],indexed) then 
-                rec:-decR[pol][i]:=0,0
-            fi;
-        od;
-    od;
+    pfrac:=polpart+add(add(pfrac[pol,ff],ff=Qdec[pol]),pol=CurRepres);
+    ASSERT(normal(CanonicalFormToRat(pfrac,rec)-R)=0);
+    pfrac
 end:
 
 #RootDifferInt
@@ -691,17 +524,22 @@ end:
 RootDifferInt:= proc(P,Q,var)
 local i::nothing,inds,rndpoint,PP,QQ,degP,degQ,R;
     if P=0 or Q=0 then error "computing dispersion with 0 polynomial" fi;
+    degP:=degree(P,var);degQ:=degree(Q,var);
+    if degP=0 or degQ=0 then return [] fi;
     inds:=(indets(P) union indets(Q)) minus {var};
-    degP:=degree(P,var);
-    degQ:=degree(Q,var);
     do
         rndpoint:=[seq(i=rnd()/rnd(),i=inds)];
         PP:=eval(primpart(P,var),rndpoint);
         QQ:=eval(primpart(Q,var),rndpoint);
-        if degP=degree(PP,var) and degQ=degree(QQ,var) then break fi
+        if degP<>degree(PP,var) or degQ<>degree(QQ,var) then next fi;
+        if length(PP)<=length(QQ) then
+            R:=roots(resultant(translate(PP,var,-i),QQ,var),i)
+        else
+            R:=roots(resultant(PP,translate(QQ,var,i),var),i)
+        fi;
+        R:=select(type,map2(op,1,R),integer);
+        if remove(has,[seq(gcd(translate(P,var,-i),Q),i=R)],var)=[] then return R fi
     od;
-    R:=roots(resultant(eval(PP,var=var-i),QQ,var),i);
-    select(type,map2(op,1,R),integer)
 end proc;
 
 #IndEqInfty
@@ -734,16 +572,13 @@ valpol2:=proc(
     Q :: depends(polynom(anything, t)),
     t :: name, co
               )
-local i,q,p,cont,r;
+local i,q,p,cont,newp;
     p:=P;q:=primpart(Q,t,'cont');
     if normal(P)=0 then return infinity fi;
     if type(p,polynom(rational)) and type(q,polynom(rational)) then
         for i while divide(p,q,'p') do od
     else
-        for i do
-            r:=rem(p,q,t,'p');
-            if r<>0 then p:=r; break fi 
-        od
+        for i do if rem(p,q,t,'newp')=0 then p:=newp else break fi od
     fi;
     if nargs=4 then
         co:=p/cont^(i-1)
@@ -751,32 +586,138 @@ local i,q,p,cont,r;
     i-1
 end:
 
-
-### Input
-### - X a linear operator in Sn given as a vector or an Orepoly in Sn
-### - Sn the variable of the previous polynomial
-### - n the variable associated to Sn
-### - u a rational fraction
-###
-### Output
-### - G(n)(u,cv) such that uL(cv)-L*(u)cv = G(n+1)(u,cv)-G(n)(u,cv) (lagrange identity)
-###
-
-#Certif_lagrange
-# Input:
-#   u: a rational function in rec:-var
-#   rec: record as constructed by InitRed
+# Input: 
+#   u:  sequence given as a polynomial in _Pfrac[] and _Shift
+#   rec: record created by InitRed
 # Output:
-#   result: a vector containing the certificate associated to the lagrange identity 
-#           L_2(u) -L(1)u = \Delta_n(result) where L_2 is the antecedent of L by the adjoint operator 
-certif_lagrange:=proc(u,rec)
-local  result,i,k,var,r;
-    var:=rec:-var;
-    r:=rec:-r;
-    result:=Vector(r);
-    for i to r do 
-        result[i]:=add(eval(rec:-L[k+1],var=var+i-1)*eval(u,var=var-k+i-1),k=i..r)
-    od;
-    rec:-denG:=lcm(rec:-denG,seq(primpart(denom(normal(result[i])),var),i=1..r));
-    result
+#   add(L[i+1]*u(var-i),i=0..r)
+evalL:=proc(u,rec)
+local lco,lmon,i,j,polpart,polind;
+    lco:=[coeffs(u,[_Shift,op(indets(u,specindex(anything,_Pfrac)))],'lmon')]; lmon:=[lmon];
+    if member(1,lmon,'polind') then
+        polpart:=add(rec:-L[i+1]*translate(lco[polind],rec:-var,-i),i=0..rec:-r);
+        lco:=subsop(polind=NULL,lco);
+        lmon:=subsop(polind=NULL,lmon)
+    else polpart:=0
+    fi;
+    polpart+add(add(rec:-L[i+1]*translate(lco[j],rec:-var,-i)*lmon[j]*_Shift^i,i=0..rec:-r),j=1..nops(lco))
 end:
+
+#evalL:=proc(u,rec)
+#local lco,lmon,i,j,polpart,polind,var,rr,degshift,pol,deg;
+#    lco:=[coeffs(u,[_Shift,op(indets(u,specindex(anything,_Pfrac)))],'lmon')]; lmon:=[lmon];
+#    var:=rec:-var;
+#    if member(1,lmon,'polind') then
+#        polpart:=add(rec:-L[i+1]*translate(lco[polind],rec:-var,-i),i=0..rec:-r);
+#        lco:=subsop(polind=NULL,lco);
+#        lmon:=subsop(polind=NULL,lmon)
+#    elif nops(lmon)=1 then # this is what happens during the weak reduction
+#        lmon:=op(lmon);lco:=op(lco);
+#        degshift:=degree(lmon,_Shift);
+#        pol:=op(op(indets(lmon,specindex(anything,_Pfrac))));
+#        deg:=degree(lmon,_Pfrac[pol]);
+#        for i from 0 to rec:-r do
+#            polpart[i]:=quo(rec:-L[i+1]*translate(lco,var,-i),subs(var=var-i-degshift,pol)^deg,var,rr[i])
+#        end do;
+#        return add(polpart[i],i=0..rec:-r)+add(rr[i]*_Pfrac[pol]^deg*_Shift^(degshift+i),i=0..rec:-r)
+#    else polpart:=0
+#    fi;
+#    polpart+add(add(rec:-L[i+1]*translate(lco[j],var,-i)*lmon[j]*_Shift^i,i=0..rec:-r),j=1..nops(lco))
+#end:
+
+
+evalLcert:=proc(u,rec)
+local i;
+    add(rec:-L[i+1]*subs(rec:-var=rec:-var-i,u),i=0..rec:-r)
+end:
+
+SplitFrac:=proc(u)
+local inds,i,polpart,ratpart;
+    inds:=indets(u,specindex(_Pfrac));
+    polpart:=subs([seq(i=0,i=inds)],u);
+    ratpart:=expand(u-polpart);
+    polpart,ratpart
+end:
+
+# Input:
+#   . list of normalized rational fractions (check) in the form 
+#       of polynomials in _Shift and _Pfrac[pol]
+#   . corresponding list of certificates
+#   . polynomial involved in _Pfrac[pol]
+#   . rec 
+# Output: 
+#   list of 3 elements:
+#   . basis: an ordered list of rational fractions
+#   . cert: corresponding list of certificates
+# The elements of basis are stored as polynomials
+# with terms c(var)*_Pfrac[pol]^k*_Shift^m
+# where deg c < k*deg pol and gcd(c,pol(var-m))=1.
+# the list is sorted by decreasing degree in _Shift,
+# then decreasing degree in _Pfrac[pol], then in var.
+RowEchelonForm:=proc(lrat,lcert,pol,rec)
+local s,basis,i,j,u,cert, co, coj, dddu, 
+      dddv, ddu, ddv, du, dv, lcu, lcv, lind, llcu, llcv, pvar, var;
+    var:=rec:-var;pvar:=_Pfrac[pol];
+    basis:=lrat;cert:=lcert;
+    s:=nops(lrat);
+    for i to s do 
+        # 1. find pivot
+        lind:=[i];
+        u:=basis[i];
+        du:=degree(u,_Shift);ddu:=-1;dddu:=-1;
+        for j from i+1 to s do
+            dv:=degree(basis[j],_Shift);
+            if dv=0 then next fi;
+            if du>dv then next fi;
+            if du<dv then lind:=[j]; u:=basis[j]; du:=dv; ddu:=-1; dddu:=-1; next fi;
+            if ddu=-1 then
+                lcu:=coeff(u,_Shift,du);
+                ddu:=degree(lcu,pvar);
+            fi;
+            lcv:=coeff(basis[j],_Shift,du);
+            ddv:=degree(lcv,pvar);
+            if ddu>ddv then next fi;
+            if ddu<ddv then lind:=[j]; u:=basis[j]; lcu:=lcv; du:=dv; ddu:=ddv; dddu:=-1; next fi;
+            if dddu=-1 then
+                llcu:=coeff(lcu,pvar,ddu);
+                dddu:=degree(llcu,var)
+            fi;
+            llcv:=coeff(lcv,pvar,ddu);
+            dddv:=degree(llcv,var);
+            if dddu>dddv then next fi;
+            if dddu<dddv then lind:=[j]; u:=basis[j]; lcu:=lcv; llcu:=llcv; du:=dv; ddu:=ddv; dddu:=dddv; next fi;
+            lind:=[op(lind),j]
+        end do;
+        # 2. swap rows if necessary
+        j:=lind[1];
+        if i<>j then
+            basis[i],basis[j]:=basis[j],basis[i];
+            cert[i],cert[j]:=cert[j],cert[i]
+        fi;
+        if du=0 then break fi; # only polynomials left
+        if nops(lind)>1 then
+            # 3. pivot rows that require it
+            co:=coeff(llcu,var,dddu);
+            for j in subsop(1=NULL,lind) do
+                coj:=coeff(coeff(coeff(basis[j],_Shift,du),pvar,ddu),var,dddu);
+                coj:=normal(coj/co);
+#                basis[j]:=expand(basis[j]-coj*basis[i]);
+                basis[j]:=collect(basis[j]-coj*basis[i],[_Shift,pvar,var],'distributed',normal);
+                if rec:-CertB then cert[j]:=cert[j]-coj*cert[i] fi
+            end do
+        fi
+    od;
+    for i to s do 
+        basis[i]:=primpart(basis[i],[_Shift,pvar,var],'co');
+        if rec:-CertB then cert[i]:=cert[i]/co fi;
+    od;
+    [seq([basis[i],cert[i]],i=1..s)]
+end:
+
+# R = canform + L^*(cert)
+TestCanonicalForm:=proc(R,canform,cert,rec)
+local i;
+    evalb(normal(CanonicalFormToRat(R-canform,rec) - 
+        add(rec:-L[i+1]*subs(rec:-var=rec:-var-i,cert),i=0..rec:-r))=0)
+end:
+

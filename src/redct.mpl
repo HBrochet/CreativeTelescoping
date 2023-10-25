@@ -1,5 +1,3 @@
-# Copyright (c) 2018, Alin Bostan, Frédéric Chyzak, Pierre Lairez, Bruno Salvy
-
 read "Mgfun_missing.mpl":
 read "red.mpl";
 
@@ -40,7 +38,7 @@ local mm,prefact,singsandshift,shiftinfinity,ratfun,shellremoved,polpart:=1,F,co
   basis,comp:=cyclic_vec(matrices[x::diff],x);
   cv:=convert(basis[1..dim,1..1],Vector);
   Dx:=D[x];
-  diffop:=adjoint(numer(normal(Dx^dim-add(comp[i]*Dx^(i-1),i=1..dim))),Dx,x);
+  diffop:=adjoint_diff(numer(normal(Dx^dim-add(comp[i]*Dx^(i-1),i=1..dim))),Dx,x);
   diffop:=primpart(diffop,Dx,'prefact');
   if dim=1 then
     diffop,co,singsandshift:=removeshell(diffop,'Dvar'=Dx,'tvar'=x,_options);
@@ -68,7 +66,7 @@ local mm,prefact,singsandshift,shiftinfinity,ratfun,shellremoved,polpart:=1,F,co
       X:=LinearAlgebra['LinearSolve'](basis,matrices[vv].subs(var=var+1,cv));
     else error "two lines missing in the code"
     fi;
-    newop:=adjoint(add(X[i]*Dx^(i-1),i=1..dim),Dx,x);
+    newop:=adjoint_diff(add(X[i]*Dx^(i-1),i=1..dim),Dx,x);
     newop:=add(coeff(newop,Dx,i)*diff(y(x),[x$i]),i=0..dim-1);
     if op(2,vv)='shift' then
       action[op(1,vv)]:=subs(_v=op(1,vv),_newop=subs(y(x)=_r2,newop),_arg=ratfun,
@@ -82,11 +80,11 @@ local mm,prefact,singsandshift,shiftinfinity,ratfun,shellremoved,polpart:=1,F,co
   ini:=LinearAlgebra['LinearSolve'](basis,Vector([1,0$(dim-1)]));
   ini:=polpart*add((-1)^i*diff(ini[i+1],[x$i]),i=0..dim-1);
   ###
-  scalar_red_ct(diffop,ini,prefact,subs(x::diff=NULL,vars),eval(action),'Dvar'=Dx,'tvar'=x,_options,'liouvilleform'=(shellremoved or not minimal))
+  scalar_red_ct_int(diffop,ini,prefact,subs(x::diff=NULL,vars),eval(action),'Dvar'=Dx,'tvar'=x,_options,'liouvilleform'=(shellremoved or not minimal))
 end:
 
 
-scalar_red_ct:=proc(diffop,ini,prefact,vars,action,
+scalar_red_ct_int:=proc(diffop,ini,prefact,vars,action,
     { Dvar :: name := NULL,
       tvar :: name := NULL,
       cert := 0,
@@ -218,7 +216,7 @@ local order,sings,sing,Q,shift,zz,N,g,zero,newdop,i,den,prefact;
 end:
 
 ### computes the adjoint operator
-adjoint:=proc(dop,Dx,x)
+adjoint_diff:=proc(dop,Dx,x)
 local res, i, r, A, y ;
   r:=degree(dop,Dx);
     res:=0;
