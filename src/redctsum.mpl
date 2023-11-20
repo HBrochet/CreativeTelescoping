@@ -202,6 +202,7 @@ LFSolb,cert,certS,ttt:=time(),coHH,cert2,densol, ord;
     # HH = red[mon] + L^*(cert)
     red[mon],cert:=Reduction(HH,rec); 
     userinfo(2,'redct',"reduction done at time:",time()-ttt);
+    userinfo(3,'redct',"size of the canonical form:", length(red[mon]));
     userinfo(4,'redct',"reduces to",normal(CanonicalFormToRat(coHH*red[mon],rec)));
 
     if certS then 
