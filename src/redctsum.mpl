@@ -1,3 +1,4 @@
+# Copyright (c) 2023, Hadrien Brochet, Bruno Salvy
 read "Mgfun_missing.mpl":
 
 macro(translate=PolynomialTools['Translate']);

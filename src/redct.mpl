@@ -1,3 +1,5 @@
+# Copyright (c) 2018, Alin Bostan, Frédéric Chyzak, Pierre Lairez, Bruno Salvy
+
 read "Mgfun_missing.mpl":
 read "red.mpl";
 
