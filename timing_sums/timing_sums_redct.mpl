@@ -1,4 +1,4 @@
-libname := libname, "../.";
+libname := "..",libname;
 with(CreativeTelescoping);
 kernelopts(opaquemodules=false): ## needed for now but should be removed in the future
 
