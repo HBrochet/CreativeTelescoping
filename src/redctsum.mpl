@@ -154,7 +154,7 @@ LFSolb,cert,certS,ttt:=time(),coHH,cert2,densol, ord;
   pol[1]:=1;
   inds:=indets(shiftop,name) minus {n,D[n]} union {op(varsres)};
   rnd:=rand(-1000..1000);
-  rndpoint:=[seq(op(1,i)=rnd(),i=inds)];
+  rndpoint:=[seq(i=rnd(),i=inds)];
   ord := tdeg(seq(D[op(1,var)], var in vars));
 
 

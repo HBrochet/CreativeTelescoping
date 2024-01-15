@@ -111,7 +111,7 @@ varsres,mat,inds;
   pol[1]:=1;
   inds:=indets(diffop,name) minus {x,D[x]} union {op(varsres)};
   rnd:=rand(-1000..1000);
-  rndpoint:=[seq(op(1,i)=rnd(),i=inds)];
+  rndpoint:=[seq(i=rnd(),i=inds)];
   # finds generators of a D-finite ideal, or a quotient of dimension > _ORDMAX
   while nextmons<>[] and nops(lmons)<_ORDMAX do
     mon:=nextmons[1];
