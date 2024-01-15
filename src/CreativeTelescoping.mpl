@@ -5,7 +5,7 @@ CreativeTelescoping:=module()
 
 option package;
 
-export EvalCert, testcert, hypergeomtosum, SingularitiesCertificate;
+export EvalCert, TestCert, hypergeomtosum, SingularitiesCertificate;
 
 local ModuleApply, really_lose_info_I_mean_it, _ORDMAX, redctint, redctsum, scalar_red_ct, removeshell,
 adjoint, cyclic_vec, try_cyclic_vec, certif_lagrange_v, scalar_red_ct_int, adjoint_diff, adjoint_shift,
@@ -19,7 +19,7 @@ hermitered0, hermitered1, hermitered, exceptionalbasis, echelonpols, redmodpols,
 reduction, PfracAction, Dmon, MulPfrac, CanonicalFormToRat, splitdenom, TestCanonicalForm,
 RowEchelonForm, SplitFrac, evalLcert, evalL, ShiftlessDecIrred, NormalizePfracElement,
 ExtractPolynomialPart,StrongReduction, WeakReduction, LocalReduction, ReductionPolynomial,
-factpol,singpolmul, internal_test_cert, normaldag, splitlist,cyclic_vec_shift,try_cyclic_vec_shift;
+factpol,singpolmul, internal_test_cert, normaldag, splitlist,cyclic_vec_shift,try_cyclic_vec_shift,version;
 
 $include<Mgfun_missing.mpl>
 
@@ -28,6 +28,7 @@ $include<redctsum.mpl>
 $include<red_difference_op.mpl>
 $include<red.mpl>
 
+version:=1.02:
 
 ModuleApply := proc(sumorint,alg,{certificate :: name:=NULL,LFSolbasis :: name :=NULL})
     if op(0,sumorint) = 'Sum' then 

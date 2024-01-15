@@ -1,4 +1,4 @@
-# Copyright (c) 2023, Hadrien Brochet, Bruno Salvy
+# Copyright (c) 2023-2024, Hadrien Brochet, Bruno Salvy
 read "Mgfun_missing.mpl":
 
 macro(translate=PolynomialTools['Translate']);
@@ -579,7 +579,7 @@ option remember;
   fi
 end:
 
-#testcert:
+#TestCert:
 # Input:
 #   T: a telescoper as returned by redct
 #   G: a certificate as returned by redct
@@ -589,7 +589,7 @@ end:
 #   true or false depending on whether the couple (T,G) corresponds to an element 
 #   of the annihilator of the summand.
 #
-testcert:=proc(telesc,cert,S,vars,point :: list := [])
+TestCert:=proc(telesc,cert,S,vars,point :: list := [])
 local n,pointwithoutn,valcert,shiftvalcert,valn;
   n:=op([2,1],S);
   if has(point,n) then
