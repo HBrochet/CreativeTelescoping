@@ -290,7 +290,7 @@ LFSolb,cert,certS,ttt:=time(),coHH,cert2,densol, ord;
           if c>0 then argshift:= argshift,op(1,l)=op(1,l)+c fi;
         od;
 
-        if argshift = NULL then argshift:= [] fi;
+        argshift:= [argshift];
         if nops([argdiff])> 0 then 
           newop:= newop + terms[i]*eval(diff(__f(op(varsres)),argdiff),argshift);
         else 
