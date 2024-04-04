@@ -225,26 +225,25 @@ LFSolb,cert,certS,ttt:=time(),coHH,cert2,densol, ord;
     sys:=expand(elementquotient-red[mon]);
     sys:={coeffs(sys,[op(indets(sys,specindex(anything,_Pfrac))),_Shift,n])};
     newelt:=red[mon];
-    if remove(has,sys,x)<>{} then sol:=NULL
-    else
-      mat:=LinearAlgebra['GenerateMatrix'](sys, [seq(x[i],i=quotient)], 'augmented' = true);
-      if op([1,1],mat)>=op([1,2],mat) then
-      # probabilistic test of consistency first
-        try
-          sol:=LinearAlgebra['LinearSolve'](eval(mat,rndpoint),'method'='modular')
+
+    mat:=LinearAlgebra['GenerateMatrix'](sys, [seq(x[i],i=quotient)], 'augmented' = true);
+    if op([1,1],mat)>=op([1,2],mat) then
+    # probabilistic test of consistency first
+      try
+        sol:=LinearAlgebra['LinearSolve'](eval(mat,rndpoint),'method'='modular')
 #          sol:=LinearAlgebra['LinearSolve'](eval(mat,rndpoint))
-        catch "system is inconsistent","inconsistent system": sol:=NULL
-        end try
-      fi;
-      if op([1,1],mat)<op([1,2],mat) or sol<>NULL then
-        userinfo(2,'redct',"dimension of the matrix:",nops(quotient));
-        userinfo(2,'redct',"col. degrees of the matrix entries:",seq(max(map(degree,convert(mat[1..-1,i],list),varsres)),i=1..nops(quotient)));
-        try
-          sol:=LinearAlgebra['LinearSolve'](mat,'method'='solve');
-        catch: sol:=NULL
-        end try;
-      fi
+      catch "system is inconsistent","inconsistent system": sol:=NULL
+      end try
     fi;
+    if op([1,1],mat)<op([1,2],mat) or sol<>NULL then
+      userinfo(2,'redct',"dimension of the matrix:",nops(quotient));
+      userinfo(2,'redct',"col. degrees of the matrix entries:",seq(max(map(degree,convert(mat[1..-1,i],list),varsres)),i=1..nops(quotient)));
+      try
+        sol:=LinearAlgebra['LinearSolve'](mat,'method'='solve');
+      catch: sol:=NULL
+      end try;
+    fi;
+
     if sol<> NULL then
       userinfo(2,'redct',"relation found");
       userinfo(2,'redct',"degree of the solution:",max(
@@ -277,9 +276,9 @@ LFSolb,cert,certS,ttt:=time(),coHH,cert2,densol, ord;
 
   if LFSolb then 
     for oper in basis do 
-      terms:=coeffs(oper,dvars,'t');
+      terms:=[coeffs(oper,dvars,'t')];
       newop:=0;
-      for i from 1 to nops([terms]) do 
+      for i from 1 to nops(terms) do 
         argdiff:= NULL;
         argshift:= NULL;
         for l in diffvars do 
